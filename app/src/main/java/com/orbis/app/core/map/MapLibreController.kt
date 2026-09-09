@@ -1,6 +1,7 @@
 package com.orbis.app.core.map
 
 import com.orbis.app.model.CameraSnapshot
+import com.orbis.app.model.LocalRasterFormat
 import com.orbis.app.model.LocalRasterLayer
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
@@ -29,9 +30,6 @@ class MapLibreController {
     fun bind(mapLibreMap: MapLibreMap) {
         map = mapLibreMap
         mapLibreMap.setTileCacheEnabled(true)
-        // MapLibre defaults to zoom 22. Orbis explicitly raises the display ceiling
-        // to the renderer maximum so providers with deeper native levels are not
-        // artificially capped by the application.
         mapLibreMap.setMaxZoomPreference(RENDERER_MAX_DISPLAY_ZOOM)
     }
 
@@ -52,7 +50,6 @@ class MapLibreController {
         map?.setStyle(provider.styleUri) { loadedStyle ->
             style = loadedStyle
             layers.forEach { addRasterToStyle(it) }
-            // Styles can replace sources; re-apply the quality policy after every load.
             setMaxDetail(maxDetailEnabled)
             onLoaded()
         }
@@ -61,10 +58,6 @@ class MapLibreController {
     fun setMaxDetail(enabled: Boolean) {
         maxDetailEnabled = enabled
         val mapLibreMap = map ?: return
-        // In MAX DETAIL, ask for ideal tiles immediately rather than deliberately
-        // loading a lower-LOD parent first. Parent tiles may still be used briefly
-        // by the renderer while ideal tiles are unavailable, but overscaling is kept
-        // tight so they are replaced quickly by real higher-resolution tiles.
         mapLibreMap.setPrefetchZoomDelta(if (enabled) 0 else 4)
         mapLibreMap.setTileCacheEnabled(true)
         mapLibreMap.setMaxZoomPreference(RENDERER_MAX_DISPLAY_ZOOM)
@@ -131,11 +124,12 @@ class MapLibreController {
         val styleLayerId = layerStyleId(layer.id)
 
         if (style.getSource(sourceId) == null) {
-            val source = RasterSource(
-                sourceId,
-                "pmtiles://file://${file.absolutePath}",
-                256,
-            )
+            val uri = when (layer.format) {
+                LocalRasterFormat.PMTILES -> "pmtiles://file://${file.absolutePath}"
+                LocalRasterFormat.MBTILES -> "mbtiles://${file.absolutePath}"
+            }
+            val source = layer.tileSize?.let { RasterSource(sourceId, uri, it) }
+                ?: RasterSource(sourceId, uri)
             if (maxDetailEnabled) {
                 source.setMaxOverscaleFactorForParentTiles(1)
                 source.setPrefetchZoomDelta(0)
