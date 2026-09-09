@@ -87,6 +87,17 @@ class MapLibreController {
     }
 
     /**
+     * Temporarily hides a raster for visual comparison without changing project state.
+     * Releasing compare restores the exact saved visibility/opacity.
+     */
+    fun setRasterPreviewHidden(layerId: String, hidden: Boolean) {
+        val layer = rasterLayers[layerId] ?: return
+        val rasterLayer = style?.getLayerAs<RasterLayer>(layerStyleId(layerId)) ?: return
+        val opacity = if (hidden) 0f else if (layer.visible) layer.opacity else 0f
+        rasterLayer.setProperties(rasterOpacity(opacity))
+    }
+
+    /**
      * Applies a top-to-bottom project layer order without recreating raster sources.
      * Removing by Layer object preserves a reusable native layer reference.
      */
