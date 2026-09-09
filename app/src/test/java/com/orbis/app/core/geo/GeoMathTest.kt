@@ -21,6 +21,15 @@ class GeoMathTest {
     }
 
     @Test
+    fun antimeridianUsesShortEdgeInsteadOfGoingAroundWorld() {
+        val distance = GeoMath.distanceMeters(
+            GeoMath.Coordinate(0.0, 179.9),
+            GeoMath.Coordinate(0.0, -179.9),
+        )
+        assertEquals(22_239.0, distance, 30.0)
+    }
+
+    @Test
     fun polylineAddsEverySegment() {
         val distance = GeoMath.polylineDistanceMeters(
             listOf(
@@ -30,6 +39,32 @@ class GeoMathTest {
             )
         )
         assertEquals(222_390.0, distance, 60.0)
+    }
+
+    @Test
+    fun oneDegreeEquatorialSquareHasExpectedSphericalArea() {
+        val square = listOf(
+            GeoMath.Coordinate(0.0, 0.0),
+            GeoMath.Coordinate(0.0, 1.0),
+            GeoMath.Coordinate(1.0, 1.0),
+            GeoMath.Coordinate(1.0, 0.0),
+        )
+        assertEquals(12_363_718_145.0, GeoMath.polygonAreaSquareMeters(square), 2_000_000.0)
+        assertEquals(444_763.0, GeoMath.polygonPerimeterMeters(square), 500.0)
+    }
+
+    @Test
+    fun areaNeedsAtLeastThreePoints() {
+        assertEquals(
+            0.0,
+            GeoMath.polygonAreaSquareMeters(
+                listOf(
+                    GeoMath.Coordinate(0.0, 0.0),
+                    GeoMath.Coordinate(0.0, 1.0),
+                )
+            ),
+            0.001,
+        )
     }
 
     @Test
