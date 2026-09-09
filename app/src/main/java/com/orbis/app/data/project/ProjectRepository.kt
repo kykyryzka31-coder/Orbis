@@ -6,6 +6,7 @@ import com.orbis.app.core.map.MapProviderKind
 import com.orbis.app.model.CameraSnapshot
 import com.orbis.app.model.LocalRasterFormat
 import com.orbis.app.model.LocalRasterLayer
+import com.orbis.app.model.MapPoint
 import com.orbis.app.model.ProjectSnapshot
 
 class ProjectRepository(context: Context) {
@@ -54,6 +55,21 @@ class ProjectRepository(context: Context) {
                 }
                 database.insertOrThrow("raster_layer", null, values)
             }
+
+            database.delete("map_point", "project_id = ?", arrayOf("1"))
+            snapshot.points.forEachIndexed { index, point ->
+                val values = ContentValues().apply {
+                    put("id", point.id)
+                    put("project_id", 1L)
+                    put("name", point.name)
+                    put("latitude", point.latitude)
+                    put("longitude", point.longitude)
+                    put("created_at", point.createdAt)
+                    put("sort_order", index)
+                }
+                database.insertOrThrow("map_point", null, values)
+            }
+
             database.setTransactionSuccessful()
         } finally {
             database.endTransaction()
@@ -105,6 +121,27 @@ class ProjectRepository(context: Context) {
                 }
             }
 
+            val points = mutableListOf<MapPoint>()
+            database.query(
+                "map_point",
+                null,
+                "project_id = ?",
+                arrayOf("1"),
+                null,
+                null,
+                "sort_order ASC",
+            ).use { pointCursor ->
+                while (pointCursor.moveToNext()) {
+                    points += MapPoint(
+                        id = pointCursor.getString(pointCursor.getColumnIndexOrThrow("id")),
+                        name = pointCursor.getString(pointCursor.getColumnIndexOrThrow("name")),
+                        latitude = pointCursor.getDouble(pointCursor.getColumnIndexOrThrow("latitude")),
+                        longitude = pointCursor.getDouble(pointCursor.getColumnIndexOrThrow("longitude")),
+                        createdAt = pointCursor.getLong(pointCursor.getColumnIndexOrThrow("created_at")),
+                    )
+                }
+            }
+
             return ProjectSnapshot(
                 name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
                 providerTitle = cursor.getString(cursor.getColumnIndexOrThrow("provider_title")),
@@ -124,6 +161,7 @@ class ProjectRepository(context: Context) {
                     tilt = cursor.getDouble(cursor.getColumnIndexOrThrow("camera_tilt")),
                 ),
                 rasterLayers = layers,
+                points = points,
             )
         }
     }
