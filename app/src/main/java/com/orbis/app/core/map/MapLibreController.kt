@@ -1,6 +1,7 @@
 package com.orbis.app.core.map
 
 import android.graphics.Color
+import com.orbis.app.core.geo.GeoMath
 import com.orbis.app.model.CameraSnapshot
 import com.orbis.app.model.LocalRasterFormat
 import com.orbis.app.model.LocalRasterLayer
@@ -10,16 +11,21 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
+import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.layers.PropertyFactory.rasterOpacity
 import org.maplibre.android.style.layers.RasterLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.RasterSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.io.File
 
@@ -33,6 +39,9 @@ class MapLibreController {
 
         private const val POINT_SOURCE_ID = "project-points-source"
         private const val POINT_LAYER_ID = "project-points-layer"
+        private const val MEASUREMENT_SOURCE_ID = "measurement-source"
+        private const val MEASUREMENT_LINE_LAYER_ID = "measurement-line-layer"
+        private const val MEASUREMENT_VERTEX_LAYER_ID = "measurement-vertex-layer"
     }
 
     private var map: MapLibreMap? = null
@@ -40,6 +49,7 @@ class MapLibreController {
     private var provider: MapProvider? = null
     private val rasterLayers = linkedMapOf<String, LocalRasterLayer>()
     private val mapPoints = linkedMapOf<String, MapPoint>()
+    private var measurementPath: List<GeoMath.Coordinate> = emptyList()
     private var maxDetailEnabled: Boolean = true
 
     fun bind(mapLibreMap: MapLibreMap) {
@@ -68,6 +78,7 @@ class MapLibreController {
             // so add them in reverse to keep the UI order visually correct.
             layers.asReversed().forEach { addRasterToStyle(it) }
             renderPoints()
+            renderMeasurement()
             setMaxDetail(maxDetailEnabled)
             onLoaded()
         }
@@ -105,6 +116,16 @@ class MapLibreController {
     fun removePoint(pointId: String) {
         mapPoints.remove(pointId)
         renderPoints()
+    }
+
+    fun setMeasurementPath(points: List<GeoMath.Coordinate>) {
+        measurementPath = points.toList()
+        renderMeasurement()
+    }
+
+    fun clearMeasurementPath() {
+        measurementPath = emptyList()
+        renderMeasurement()
     }
 
     fun addRaster(layer: LocalRasterLayer) {
@@ -146,11 +167,7 @@ class MapLibreController {
             reusableLayers[layerStyleId(layer.id)]?.let(style::addLayer)
         }
 
-        // Keep persistent map points above raster overlays after reordering.
-        style.getLayerAs<CircleLayer>(POINT_LAYER_ID)?.let { pointLayer ->
-            style.removeLayer(pointLayer)
-            style.addLayer(pointLayer)
-        }
+        bringOverlayLayersToTop(style)
     }
 
     fun removeRaster(layer: LocalRasterLayer) {
@@ -209,6 +226,64 @@ class MapLibreController {
                     )
                 }
             )
+        }
+    }
+
+    private fun renderMeasurement() {
+        val style = style ?: return
+        val vertexGeometries = measurementPath.map { point ->
+            Point.fromLngLat(point.longitude, point.latitude)
+        }
+        val features = buildList {
+            if (vertexGeometries.size >= 2) {
+                add(Feature.fromGeometry(LineString.fromLngLats(vertexGeometries)))
+            }
+            vertexGeometries.forEach { point -> add(Feature.fromGeometry(point)) }
+        }.toTypedArray()
+        val collection = FeatureCollection.fromFeatures(features)
+
+        val source = style.getSource(MEASUREMENT_SOURCE_ID) as? GeoJsonSource
+        if (source == null) {
+            style.addSource(GeoJsonSource(MEASUREMENT_SOURCE_ID, collection))
+        } else {
+            source.setGeoJson(collection)
+        }
+
+        if (style.getLayer(MEASUREMENT_LINE_LAYER_ID) == null) {
+            style.addLayer(
+                LineLayer(MEASUREMENT_LINE_LAYER_ID, MEASUREMENT_SOURCE_ID).apply {
+                    setProperties(
+                        lineColor(Color.WHITE),
+                        lineWidth(3.5f),
+                        lineOpacity(0.92f),
+                    )
+                }
+            )
+        }
+        if (style.getLayer(MEASUREMENT_VERTEX_LAYER_ID) == null) {
+            style.addLayer(
+                CircleLayer(MEASUREMENT_VERTEX_LAYER_ID, MEASUREMENT_SOURCE_ID).apply {
+                    setProperties(
+                        circleRadius(5.5f),
+                        circleColor(Color.rgb(126, 87, 255)),
+                        circleStrokeWidth(2.0f),
+                        circleStrokeColor(Color.WHITE),
+                    )
+                }
+            )
+        }
+    }
+
+    private fun bringOverlayLayersToTop(style: Style) {
+        listOf(
+            POINT_LAYER_ID,
+            MEASUREMENT_LINE_LAYER_ID,
+            MEASUREMENT_VERTEX_LAYER_ID,
+        ).forEach { layerId ->
+            style.getLayer(layerId)?.let { layer ->
+                style.removeLayer(layer)
+                style.addLayer(layer)
+            }
         }
     }
 
