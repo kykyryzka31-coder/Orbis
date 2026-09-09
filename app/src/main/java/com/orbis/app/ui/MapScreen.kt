@@ -43,6 +43,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,7 +69,10 @@ import com.orbis.app.core.map.ZoomInfo
 import com.orbis.app.data.project.ProjectRepository
 import com.orbis.app.model.LocalRasterLayer
 import com.orbis.app.model.ProjectSnapshot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.maplibre.android.maps.MapView
 import java.io.File
 import kotlin.math.roundToInt
@@ -116,10 +120,12 @@ fun MapScreen() {
 
     var mapReady by remember { mutableStateOf(false) }
     var styleReady by remember { mutableStateOf(false) }
+    var restoredCameraApplied by remember { mutableStateOf(false) }
     var showLayers by remember { mutableStateOf(false) }
     var showProvider by remember { mutableStateOf(false) }
     var displayZoom by remember { mutableDoubleStateOf(0.0) }
     var centerLat by remember { mutableDoubleStateOf(0.0) }
+    var cameraRevision by remember { mutableIntStateOf(0) }
     var transientMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(provider.styleUri) {
@@ -145,6 +151,7 @@ fun MapScreen() {
                 map.addOnCameraIdleListener {
                     displayZoom = controller.displayedZoom()
                     centerLat = controller.centerLatitude()
+                    cameraRevision += 1
                 }
                 mapReady = true
             }
@@ -171,7 +178,10 @@ fun MapScreen() {
         styleReady = false
         controller.loadProvider(provider, rasterLayers.toList()) {
             controller.setMaxDetail(maxDetail)
-            restored?.camera?.let(controller::restoreCamera)
+            if (!restoredCameraApplied) {
+                restored?.camera?.let(controller::restoreCamera)
+                restoredCameraApplied = true
+            }
             styleReady = true
             displayZoom = controller.displayedZoom()
             centerLat = controller.centerLatitude()
@@ -182,12 +192,37 @@ fun MapScreen() {
         if (styleReady) controller.setMaxDetail(maxDetail)
     }
 
+    LaunchedEffect(
+        mapReady,
+        provider.styleUri,
+        maxDetail,
+        rasterLayers.toList(),
+        cameraRevision,
+    ) {
+        if (!mapReady) return@LaunchedEffect
+        delay(AUTOSAVE_DEBOUNCE_MS)
+        val snapshot = ProjectSnapshot(
+            providerTitle = provider.title,
+            providerStyleUri = provider.styleUri,
+            providerKind = provider.kind,
+            providerMaxNativeZoom = resolvedNativeZoom,
+            maxDetailEnabled = maxDetail,
+            camera = controller.cameraSnapshot(),
+            rasterLayers = rasterLayers.toList(),
+        )
+        runCatching {
+            withContext(Dispatchers.IO) { projectRepository.save(snapshot) }
+        }.onFailure { error ->
+            transientMessage = "Autosave failed: ${error.message ?: "unknown error"}"
+        }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            runCatching { importer.importPmTiles(uri) }
+            runCatching { importer.importRaster(uri) }
                 .onSuccess { layer ->
                     rasterLayers += layer
                     controller.addRaster(layer)
@@ -219,8 +254,8 @@ fun MapScreen() {
             onLayers = { showLayers = true },
             onProvider = { showProvider = true },
             onSave = {
-                projectRepository.save(
-                    ProjectSnapshot(
+                scope.launch {
+                    val snapshot = ProjectSnapshot(
                         providerTitle = provider.title,
                         providerStyleUri = provider.styleUri,
                         providerKind = provider.kind,
@@ -229,8 +264,14 @@ fun MapScreen() {
                         camera = controller.cameraSnapshot(),
                         rasterLayers = rasterLayers.toList(),
                     )
-                )
-                transientMessage = "Project saved locally"
+                    runCatching {
+                        withContext(Dispatchers.IO) { projectRepository.save(snapshot) }
+                    }.onSuccess {
+                        transientMessage = "Project saved locally"
+                    }.onFailure { error ->
+                        transientMessage = "Save failed: ${error.message ?: "unknown error"}"
+                    }
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -249,7 +290,7 @@ fun MapScreen() {
                 Text(message, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
             }
             LaunchedEffect(message) {
-                kotlinx.coroutines.delay(2200)
+                delay(2200)
                 if (transientMessage == message) transientMessage = null
             }
         }
@@ -292,7 +333,7 @@ fun MapScreen() {
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("ADD RASTER PMTILES")
+                    Text("ADD RASTER MAP")
                 }
 
                 Row(
@@ -481,6 +522,16 @@ private fun LayerRow(
             .padding(vertical = 9.dp),
     ) {
         Text(layer.displayName, style = MaterialTheme.typography.bodyLarge)
+        val detail = buildString {
+            append(layer.format.name)
+            layer.maxNativeZoom?.let { append(" · native Z${"%.1f".format(it)}") }
+            layer.tileSize?.let { append(" · ${it}px") }
+        }
+        Text(
+            detail,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(
             "Opacity ${(layer.opacity * 100).roundToInt()}%",
             style = MaterialTheme.typography.bodySmall,
@@ -622,3 +673,5 @@ private fun ProviderDialog(
         },
     )
 }
+
+private const val AUTOSAVE_DEBOUNCE_MS = 900L
