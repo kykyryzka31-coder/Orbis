@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Save
@@ -195,6 +197,7 @@ fun MapScreen() {
     LaunchedEffect(
         mapReady,
         provider.styleUri,
+        resolvedNativeZoom,
         maxDetail,
         rasterLayers.toList(),
         cameraRevision,
@@ -224,7 +227,9 @@ fun MapScreen() {
         scope.launch {
             runCatching { importer.importRaster(uri) }
                 .onSuccess { layer ->
-                    rasterLayers += layer
+                    // Project layer order is top-to-bottom. A newly imported overlay should
+                    // immediately appear above older local layers for the common compare flow.
+                    rasterLayers.add(0, layer)
                     controller.addRaster(layer)
                     showLayers = true
                     transientMessage = "Imported ${layer.displayName}"
@@ -303,7 +308,7 @@ fun MapScreen() {
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp),
             ) {
-                Text("LAYERS", style = MaterialTheme.typography.labelLarge)
+                Text("LAYERS · TOP FIRST", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(10.dp))
                 Text(provider.title, style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -316,6 +321,22 @@ fun MapScreen() {
                 rasterLayers.forEachIndexed { index, layer ->
                     LayerRow(
                         layer = layer,
+                        canMoveUp = index > 0,
+                        canMoveDown = index < rasterLayers.lastIndex,
+                        onMoveUp = {
+                            if (index > 0) {
+                                val moving = rasterLayers.removeAt(index)
+                                rasterLayers.add(index - 1, moving)
+                                controller.setRasterOrder(rasterLayers.toList())
+                            }
+                        },
+                        onMoveDown = {
+                            if (index < rasterLayers.lastIndex) {
+                                val moving = rasterLayers.removeAt(index)
+                                rasterLayers.add(index + 1, moving)
+                                controller.setRasterOrder(rasterLayers.toList())
+                            }
+                        },
                         onChange = { updated ->
                             rasterLayers[index] = updated
                             controller.updateRaster(updated)
@@ -513,6 +534,10 @@ private fun FloatingToolbar(
 @Composable
 private fun LayerRow(
     layer: LocalRasterLayer,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
     onChange: (LocalRasterLayer) -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -521,17 +546,30 @@ private fun LayerRow(
             .fillMaxWidth()
             .padding(vertical = 9.dp),
     ) {
-        Text(layer.displayName, style = MaterialTheme.typography.bodyLarge)
-        val detail = buildString {
-            append(layer.format.name)
-            layer.maxNativeZoom?.let { append(" · native Z${"%.1f".format(it)}") }
-            layer.tileSize?.let { append(" · ${it}px") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(layer.displayName, style = MaterialTheme.typography.bodyLarge)
+                val detail = buildString {
+                    append(layer.format.name)
+                    layer.maxNativeZoom?.let { append(" · native Z${"%.1f".format(it)}") }
+                    layer.tileSize?.let { append(" · ${it}px") }
+                }
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onMoveUp, enabled = canMoveUp) {
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move layer up")
+            }
+            IconButton(onClick = onMoveDown, enabled = canMoveDown) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move layer down")
+            }
         }
-        Text(
-            detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         Text(
             "Opacity ${(layer.opacity * 100).roundToInt()}%",
             style = MaterialTheme.typography.bodySmall,
