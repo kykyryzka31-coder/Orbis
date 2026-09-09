@@ -53,6 +53,7 @@ class ProjectDatabase(context: Context) : SQLiteOpenHelper(
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX raster_layer_project_order ON raster_layer(project_id, sort_order)")
+        createMapPointTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -61,9 +62,30 @@ class ProjectDatabase(context: Context) : SQLiteOpenHelper(
             db.execSQL("ALTER TABLE raster_layer ADD COLUMN tile_size INTEGER")
             db.execSQL("ALTER TABLE raster_layer ADD COLUMN max_native_zoom REAL")
         }
+        if (oldVersion < 3) {
+            createMapPointTable(db)
+        }
+    }
+
+    private fun createMapPointTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE map_point (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES project_state(id) ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX map_point_project_order ON map_point(project_id, sort_order)")
     }
 
     companion object {
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
     }
 }
