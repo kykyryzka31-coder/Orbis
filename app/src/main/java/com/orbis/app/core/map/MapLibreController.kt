@@ -50,6 +50,7 @@ class MapLibreController {
     private val rasterLayers = linkedMapOf<String, LocalRasterLayer>()
     private val mapPoints = linkedMapOf<String, MapPoint>()
     private var measurementPath: List<GeoMath.Coordinate> = emptyList()
+    private var measurementClosed: Boolean = false
     private var maxDetailEnabled: Boolean = true
 
     fun bind(mapLibreMap: MapLibreMap) {
@@ -74,8 +75,6 @@ class MapLibreController {
 
         map?.setStyle(provider.styleUri) { loadedStyle ->
             style = loadedStyle
-            // Project order is top-to-bottom. MapLibre places newly-added layers on top,
-            // so add them in reverse to keep the UI order visually correct.
             layers.asReversed().forEach { addRasterToStyle(it) }
             renderPoints()
             renderMeasurement()
@@ -118,13 +117,15 @@ class MapLibreController {
         renderPoints()
     }
 
-    fun setMeasurementPath(points: List<GeoMath.Coordinate>) {
+    fun setMeasurementPath(points: List<GeoMath.Coordinate>, closed: Boolean = false) {
         measurementPath = points.toList()
+        measurementClosed = closed
         renderMeasurement()
     }
 
     fun clearMeasurementPath() {
         measurementPath = emptyList()
+        measurementClosed = false
         renderMeasurement()
     }
 
@@ -139,10 +140,6 @@ class MapLibreController {
         rasterLayer.setProperties(rasterOpacity(if (layer.visible) layer.opacity else 0f))
     }
 
-    /**
-     * Temporarily hides a raster for visual comparison without changing project state.
-     * Releasing compare restores the exact saved visibility/opacity.
-     */
     fun setRasterPreviewHidden(layerId: String, hidden: Boolean) {
         val layer = rasterLayers[layerId] ?: return
         val rasterLayer = style?.getLayerAs<RasterLayer>(layerStyleId(layerId)) ?: return
@@ -150,10 +147,6 @@ class MapLibreController {
         rasterLayer.setProperties(rasterOpacity(opacity))
     }
 
-    /**
-     * Applies a top-to-bottom project layer order without recreating raster sources.
-     * Removing by Layer object preserves a reusable native layer reference.
-     */
     fun setRasterOrder(layersTopToBottom: List<LocalRasterLayer>) {
         rasterLayers.clear()
         rasterLayers.putAll(layersTopToBottom.associateBy { it.id })
@@ -166,7 +159,6 @@ class MapLibreController {
         layersTopToBottom.asReversed().forEach { layer ->
             reusableLayers[layerStyleId(layer.id)]?.let(style::addLayer)
         }
-
         bringOverlayLayersToTop(style)
     }
 
@@ -234,9 +226,14 @@ class MapLibreController {
         val vertexGeometries = measurementPath.map { point ->
             Point.fromLngLat(point.longitude, point.latitude)
         }
+        val lineGeometries = if (measurementClosed && vertexGeometries.size >= 3) {
+            vertexGeometries + vertexGeometries.first()
+        } else {
+            vertexGeometries
+        }
         val features = buildList {
-            if (vertexGeometries.size >= 2) {
-                add(Feature.fromGeometry(LineString.fromLngLats(vertexGeometries)))
+            if (lineGeometries.size >= 2) {
+                add(Feature.fromGeometry(LineString.fromLngLats(lineGeometries)))
             }
             vertexGeometries.forEach { point -> add(Feature.fromGeometry(point)) }
         }.toTypedArray()
