@@ -71,6 +71,7 @@ import com.orbis.app.core.map.ProviderRegistry
 import com.orbis.app.core.map.ZoomInfo
 import com.orbis.app.data.project.ProjectRepository
 import com.orbis.app.model.LocalRasterLayer
+import com.orbis.app.model.MapPoint
 import com.orbis.app.model.ProjectSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -79,6 +80,7 @@ import kotlinx.coroutines.withContext
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import java.io.File
+import java.util.UUID
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,6 +121,11 @@ fun MapScreen() {
     val rasterLayers = remember {
         mutableStateListOf<LocalRasterLayer>().apply {
             addAll(restored?.rasterLayers?.filter { File(it.filePath).exists() }.orEmpty())
+        }
+    }
+    val points = remember {
+        mutableStateListOf<MapPoint>().apply {
+            addAll(restored?.points.orEmpty())
         }
     }
 
@@ -185,6 +192,7 @@ fun MapScreen() {
     LaunchedEffect(mapReady, provider.styleUri) {
         if (!mapReady) return@LaunchedEffect
         styleReady = false
+        controller.setPoints(points.toList())
         controller.loadProvider(provider, rasterLayers.toList()) {
             controller.setMaxDetail(maxDetail)
             if (!restoredCameraApplied) {
@@ -207,6 +215,7 @@ fun MapScreen() {
         resolvedNativeZoom,
         maxDetail,
         rasterLayers.toList(),
+        points.toList(),
         cameraRevision,
     ) {
         if (!mapReady) return@LaunchedEffect
@@ -219,6 +228,7 @@ fun MapScreen() {
             maxDetailEnabled = maxDetail,
             camera = controller.cameraSnapshot(),
             rasterLayers = rasterLayers.toList(),
+            points = points.toList(),
         )
         runCatching {
             withContext(Dispatchers.IO) { projectRepository.save(snapshot) }
@@ -273,6 +283,7 @@ fun MapScreen() {
                         maxDetailEnabled = maxDetail,
                         camera = controller.cameraSnapshot(),
                         rasterLayers = rasterLayers.toList(),
+                        points = points.toList(),
                     )
                     runCatching {
                         withContext(Dispatchers.IO) { projectRepository.save(snapshot) }
@@ -317,7 +328,7 @@ fun MapScreen() {
                 Spacer(Modifier.height(10.dp))
                 Text(provider.title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Base map",
+                    "Base map · ${points.size} saved points",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -455,6 +466,18 @@ fun MapScreen() {
                     as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Coordinates", value))
                 transientMessage = "Coordinates copied"
+            },
+            onAddPoint = {
+                val point = MapPoint(
+                    id = UUID.randomUUID().toString(),
+                    name = "Point ${points.size + 1}",
+                    latitude = coordinate.latitude,
+                    longitude = coordinate.longitude,
+                )
+                points.add(0, point)
+                controller.addPoint(point)
+                selectedCoordinate = null
+                transientMessage = "${point.name} added"
             },
             onDismiss = { selectedCoordinate = null },
         )
@@ -652,6 +675,7 @@ private fun LayerRow(
 private fun CoordinateSheet(
     coordinate: LatLng,
     onCopy: () -> Unit,
+    onAddPoint: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -675,7 +699,10 @@ private fun CoordinateSheet(
                 CoordinateFormatter.dms(coordinate.latitude, coordinate.longitude),
                 style = MaterialTheme.typography.bodyLarge,
             )
-            OutlinedButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onAddPoint, modifier = Modifier.fillMaxWidth()) {
+                Text("ADD POINT")
+            }
+            TextButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) {
                 Text("COPY COORDINATES")
             }
             Spacer(Modifier.height(12.dp))
