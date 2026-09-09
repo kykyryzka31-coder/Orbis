@@ -12,6 +12,7 @@ data class LocalRasterLayer(
     val format: LocalRasterFormat = LocalRasterFormat.PMTILES,
     val tileSize: Int? = null,
     val maxNativeZoom: Double? = null,
+    val bounds: GeoBounds? = null,
     val opacity: Float = 0.72f,
     val visible: Boolean = true,
 )
