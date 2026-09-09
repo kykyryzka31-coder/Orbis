@@ -8,11 +8,12 @@ import java.net.URI
 import java.net.URL
 
 /**
- * Independently resolves native zoom/tile-size metadata from a MapLibre Style JSON
- * and HTTP(S) TileJSON sources. Unknown metadata stays unknown; it is never guessed.
+ * Independently resolves zoom/tile metadata from a MapLibre Style JSON and its
+ * TileJSON sources. Unknown values stay unknown; Orbis never invents native detail.
  */
 class ProviderMetadataResolver {
     data class ResolvedMetadata(
+        val minZoom: Double?,
         val maxNativeZoom: Double?,
         val tileSize: Int?,
     )
@@ -20,38 +21,56 @@ class ProviderMetadataResolver {
     suspend fun resolve(provider: MapProvider): ResolvedMetadata = withContext(Dispatchers.IO) {
         val declared = provider.capabilities
         val style = fetchJson(provider.styleUri) ?: return@withContext ResolvedMetadata(
+            minZoom = declared.minZoom,
             maxNativeZoom = declared.maxNativeZoom,
             tileSize = declared.tileSize,
         )
 
         val sources = style.optJSONObject("sources")
-            ?: return@withContext ResolvedMetadata(declared.maxNativeZoom, declared.tileSize)
+            ?: return@withContext ResolvedMetadata(
+                declared.minZoom,
+                declared.maxNativeZoom,
+                declared.tileSize,
+            )
 
-        val zooms = mutableListOf<Double>()
+        val minZooms = mutableListOf<Double>()
+        val maxZooms = mutableListOf<Double>()
         val tileSizes = mutableListOf<Int>()
 
         val keys = sources.keys()
         while (keys.hasNext()) {
             val source = sources.optJSONObject(keys.next()) ?: continue
-            source.optDoubleOrNull("maxzoom")?.let(zooms::add)
+            source.optDoubleOrNull("minzoom")?.let(minZooms::add)
+            source.optDoubleOrNull("maxzoom")?.let(maxZooms::add)
             source.optIntOrNull("tileSize")?.let(tileSizes::add)
 
-            val tileJsonUrl = source.optString("url").takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            // A Style JSON may reference TileJSON with an absolute or relative URL.
+            // Resolve relative URLs against the style endpoint instead of silently
+            // losing their native zoom metadata.
+            val sourceUrl = source.optString("url").takeIf { it.isNotBlank() }
+            val tileJsonUrl = sourceUrl?.let { resolveAgainst(provider.styleUri, it) }
+                ?.takeIf(::isHttpUrl)
+
             if (tileJsonUrl != null) {
-                val tileJson = fetchJson(resolveAgainst(provider.styleUri, tileJsonUrl))
-                tileJson?.optDoubleOrNull("maxzoom")?.let(zooms::add)
+                val tileJson = fetchJson(tileJsonUrl)
+                tileJson?.optDoubleOrNull("minzoom")?.let(minZooms::add)
+                tileJson?.optDoubleOrNull("maxzoom")?.let(maxZooms::add)
                 tileJson?.optIntOrNull("tileSize")?.let(tileSizes::add)
             }
         }
 
         ResolvedMetadata(
-            maxNativeZoom = declared.maxNativeZoom ?: zooms.maxOrNull(),
+            // The provider-level declared minZoom is authoritative when explicitly
+            // configured; otherwise use the least restrictive source minimum.
+            minZoom = declared.minZoom.takeIf { it > 0.0 } ?: minZooms.minOrNull() ?: declared.minZoom,
+            // A manually declared native max is an explicit provider override.
+            maxNativeZoom = declared.maxNativeZoom ?: maxZooms.maxOrNull(),
             tileSize = declared.tileSize ?: tileSizes.maxOrNull(),
         )
     }
 
     private fun fetchJson(url: String): JSONObject? {
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+        if (!isHttpUrl(url)) return null
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 5_000
             readTimeout = 7_000
@@ -73,6 +92,9 @@ class ProviderMetadataResolver {
     private fun resolveAgainst(base: String, child: String): String = runCatching {
         URI(base).resolve(child).toString()
     }.getOrDefault(child)
+
+    private fun isHttpUrl(value: String): Boolean =
+        value.startsWith("https://") || value.startsWith("http://")
 }
 
 private fun JSONObject.optDoubleOrNull(name: String): Double? {
