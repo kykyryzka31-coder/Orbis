@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import com.orbis.app.core.map.MapProviderKind
 import com.orbis.app.model.CameraSnapshot
+import com.orbis.app.model.LocalRasterFormat
 import com.orbis.app.model.LocalRasterLayer
 import com.orbis.app.model.ProjectSnapshot
 
@@ -44,6 +45,9 @@ class ProjectRepository(context: Context) {
                     put("project_id", 1L)
                     put("display_name", layer.displayName)
                     put("file_path", layer.filePath)
+                    put("raster_format", layer.format.name)
+                    layer.tileSize?.let { put("tile_size", it) } ?: putNull("tile_size")
+                    layer.maxNativeZoom?.let { put("max_native_zoom", it) } ?: putNull("max_native_zoom")
                     put("opacity", layer.opacity)
                     put("visible", if (layer.visible) 1 else 0)
                     put("sort_order", index)
@@ -81,10 +85,20 @@ class ProjectRepository(context: Context) {
                 "sort_order ASC",
             ).use { layerCursor ->
                 while (layerCursor.moveToNext()) {
+                    val tileSizeIndex = layerCursor.getColumnIndexOrThrow("tile_size")
+                    val maxZoomIndex = layerCursor.getColumnIndexOrThrow("max_native_zoom")
+                    val format = runCatching {
+                        LocalRasterFormat.valueOf(
+                            layerCursor.getString(layerCursor.getColumnIndexOrThrow("raster_format"))
+                        )
+                    }.getOrDefault(LocalRasterFormat.PMTILES)
                     layers += LocalRasterLayer(
                         id = layerCursor.getString(layerCursor.getColumnIndexOrThrow("id")),
                         displayName = layerCursor.getString(layerCursor.getColumnIndexOrThrow("display_name")),
                         filePath = layerCursor.getString(layerCursor.getColumnIndexOrThrow("file_path")),
+                        format = format,
+                        tileSize = if (layerCursor.isNull(tileSizeIndex)) null else layerCursor.getInt(tileSizeIndex),
+                        maxNativeZoom = if (layerCursor.isNull(maxZoomIndex)) null else layerCursor.getDouble(maxZoomIndex),
                         opacity = layerCursor.getFloat(layerCursor.getColumnIndexOrThrow("opacity")),
                         visible = layerCursor.getInt(layerCursor.getColumnIndexOrThrow("visible")) == 1,
                     )
