@@ -62,6 +62,7 @@ import com.orbis.app.core.map.MapProvider
 import com.orbis.app.core.map.MapProviderCapabilities
 import com.orbis.app.core.map.MapProviderKind
 import com.orbis.app.core.map.ProviderMetadataResolver
+import com.orbis.app.core.map.ProviderQualitySelector
 import com.orbis.app.core.map.ProviderRegistry
 import com.orbis.app.core.map.ZoomInfo
 import com.orbis.app.data.project.ProjectRepository
@@ -84,6 +85,7 @@ fun MapScreen() {
     val importer = remember { LocalRasterImporter(context) }
     val controller = remember { MapLibreController() }
     val metadataResolver = remember { ProviderMetadataResolver() }
+    val qualitySelector = remember { ProviderQualitySelector(metadataResolver) }
     val restored = remember { projectRepository.load() }
 
     val restoredProvider = remember(restored) {
@@ -315,9 +317,43 @@ fun MapScreen() {
     }
 
     if (showProvider) {
+        val providers = providerRegistry.listAll()
         ProviderDialog(
             current = provider,
+            providers = providers,
             onDismiss = { showProvider = false },
+            onSelect = { selected ->
+                runCatching { providerRegistry.setActive(selected.id) }
+                    .onSuccess {
+                        provider = selected
+                        showProvider = false
+                    }
+                    .onFailure { error ->
+                        transientMessage = error.message ?: "Unable to select provider"
+                    }
+            },
+            onAutoBest = {
+                scope.launch {
+                    transientMessage = "Checking native imagery detail…"
+                    runCatching { qualitySelector.chooseBestSatellite(providerRegistry.listAll()) }
+                        .onSuccess { candidate ->
+                            if (candidate == null) {
+                                transientMessage = "Add at least one satellite provider first"
+                            } else {
+                                providerRegistry.setActive(candidate.provider.id)
+                                provider = candidate.provider
+                                showProvider = false
+                                val zoom = candidate.metadata.maxNativeZoom?.let { "Z${"%.1f".format(it)}" }
+                                    ?: "native zoom unknown"
+                                val tile = candidate.metadata.tileSize?.let { " · ${it}px" }.orEmpty()
+                                transientMessage = "Best imagery: ${candidate.provider.title} · $zoom$tile"
+                            }
+                        }
+                        .onFailure { error ->
+                            transientMessage = error.message ?: "Unable to compare imagery providers"
+                        }
+                }
+            },
             onUseDemo = {
                 providerRegistry.resetToDemo()
                 provider = providerRegistry.demoProvider
@@ -478,7 +514,10 @@ private fun LayerRow(
 @Composable
 private fun ProviderDialog(
     current: MapProvider,
+    providers: List<MapProvider>,
     onDismiss: () -> Unit,
+    onSelect: (MapProvider) -> Unit,
+    onAutoBest: () -> Unit,
     onUseDemo: () -> Unit,
     onSave: (String, String, MapProviderKind, Double?) -> Unit,
 ) {
@@ -501,9 +540,31 @@ private fun ProviderDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Use a licensed MapLibre Style JSON endpoint. Orbis will read source metadata and use the deepest native zoom it exposes.",
+                    "Use licensed MapLibre Style JSON endpoints. Orbis compares real native zoom metadata instead of treating overzoom as extra detail.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+
+                if (providers.any { it.kind == MapProviderKind.SATELLITE }) {
+                    OutlinedButton(
+                        onClick = onAutoBest,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("AUTO BEST SATELLITE")
+                    }
+                }
+
+                Text("Saved maps", style = MaterialTheme.typography.labelMedium)
+                providers.forEach { saved ->
+                    TextButton(
+                        onClick = { onSelect(saved) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        val marker = if (saved.styleUri == current.styleUri) "✓ " else ""
+                        val detail = saved.capabilities.maxNativeZoom?.let { " · Z${"%.1f".format(it)}" }.orEmpty()
+                        Text("$marker${saved.title}$detail")
+                    }
+                }
+
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
