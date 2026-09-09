@@ -1,10 +1,14 @@
 package com.orbis.app.core.map
 
+import com.orbis.app.model.GeoBounds
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 
 /**
- * Minimal PMTiles v3 fixed-header parser used only for import validation and
- * native-detail metadata. It does not decode tile payloads or rewrite archives.
+ * Minimal PMTiles v3 fixed-header parser used only for import validation,
+ * native-detail metadata, and archive geographic extent. It never decodes or
+ * rewrites tile payloads.
  */
 object PmTilesV3Header {
     const val SIZE_BYTES = 127
@@ -13,6 +17,7 @@ object PmTilesV3Header {
         val tileType: Int,
         val minZoom: Int,
         val maxZoom: Int,
+        val bounds: GeoBounds?,
     ) {
         val isVector: Boolean get() = tileType == TILE_TYPE_MVT || tileType == TILE_TYPE_MLT
     }
@@ -38,15 +43,42 @@ object PmTilesV3Header {
             "Invalid PMTiles zoom range: min Z$minZoom, max Z$maxZoom."
         }
 
+        val bounds = parseBounds(header)
+
         return Info(
             tileType = header[99].unsigned(),
             minZoom = minZoom,
             maxZoom = maxZoom,
+            bounds = bounds,
         )
+    }
+
+    private fun parseBounds(header: ByteArray): GeoBounds? {
+        val west = readCoordinate(header, 102)
+        val south = readCoordinate(header, 106)
+        val east = readCoordinate(header, 110)
+        val north = readCoordinate(header, 114)
+
+        return runCatching {
+            GeoBounds(
+                west = west,
+                south = south,
+                east = east,
+                north = north,
+            )
+        }.getOrNull()?.takeIf { it.isUsefulFocusBounds() }
+    }
+
+    private fun readCoordinate(header: ByteArray, offset: Int): Double {
+        val raw = ByteBuffer.wrap(header, offset, Int.SIZE_BYTES)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .int
+        return raw / COORDINATE_SCALE
     }
 
     private fun Byte.unsigned(): Int = toInt() and 0xFF
 
     private const val TILE_TYPE_MVT = 1
     private const val TILE_TYPE_MLT = 6
+    private const val COORDINATE_SCALE = 10_000_000.0
 }
