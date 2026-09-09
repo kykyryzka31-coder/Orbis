@@ -5,12 +5,14 @@ plugins {
 
 android {
     namespace = "com.orbis.app"
-    compileSdk = 37
+    // Android 17 / API 37 is still preview on the stable SDK channel as of Sep 2026.
+    // Orbis targets the latest stable platform so CI and production builds stay reproducible.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.orbis.app"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
 
