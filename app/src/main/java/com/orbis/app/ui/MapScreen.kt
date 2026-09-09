@@ -227,8 +227,6 @@ fun MapScreen() {
         scope.launch {
             runCatching { importer.importRaster(uri) }
                 .onSuccess { layer ->
-                    // Project layer order is top-to-bottom. A newly imported overlay should
-                    // immediately appear above older local layers for the common compare flow.
                     rasterLayers.add(0, layer)
                     controller.addRaster(layer)
                     showLayers = true
@@ -335,6 +333,13 @@ fun MapScreen() {
                                 val moving = rasterLayers.removeAt(index)
                                 rasterLayers.add(index + 1, moving)
                                 controller.setRasterOrder(rasterLayers.toList())
+                            }
+                        },
+                        onBlink = {
+                            scope.launch {
+                                controller.setRasterPreviewHidden(layer.id, true)
+                                delay(BLINK_COMPARE_MS)
+                                controller.setRasterPreviewHidden(layer.id, false)
                             }
                         },
                         onChange = { updated ->
@@ -538,6 +543,7 @@ private fun LayerRow(
     canMoveDown: Boolean,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onBlink: () -> Unit,
     onChange: (LocalRasterLayer) -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -593,8 +599,13 @@ private fun LayerRow(
                     onCheckedChange = { onChange(layer.copy(visible = it)) },
                 )
             }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Close, contentDescription = "Remove layer")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBlink, enabled = layer.visible) {
+                    Text("BLINK")
+                }
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Default.Close, contentDescription = "Remove layer")
+                }
             }
         }
     }
@@ -713,3 +724,4 @@ private fun ProviderDialog(
 }
 
 private const val AUTOSAVE_DEBOUNCE_MS = 900L
+private const val BLINK_COMPARE_MS = 700L
