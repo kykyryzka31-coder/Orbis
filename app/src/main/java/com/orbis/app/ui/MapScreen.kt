@@ -589,6 +589,22 @@ private fun LayerRow(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "Quick",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OPACITY_PRESETS.forEach { preset ->
+                TextButton(onClick = { onChange(layer.copy(opacity = preset)) }) {
+                    Text("${(preset * 100).roundToInt()}%")
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -723,5 +739,6 @@ private fun ProviderDialog(
     )
 }
 
+private val OPACITY_PRESETS = listOf(0.35f, 0.65f, 1.0f)
 private const val AUTOSAVE_DEBOUNCE_MS = 900L
 private const val BLINK_COMPARE_MS = 700L
