@@ -1,15 +1,26 @@
 package com.orbis.app.core.map
 
+import android.graphics.Color
 import com.orbis.app.model.CameraSnapshot
 import com.orbis.app.model.LocalRasterFormat
 import com.orbis.app.model.LocalRasterLayer
+import com.orbis.app.model.MapPoint
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleRadius
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.rasterOpacity
 import org.maplibre.android.style.layers.RasterLayer
+import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.RasterSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.Point
 import java.io.File
 
 class MapLibreController {
@@ -19,12 +30,16 @@ class MapLibreController {
          * native geographic detail: providers may stop supplying real tiles earlier.
          */
         const val RENDERER_MAX_DISPLAY_ZOOM = 25.5
+
+        private const val POINT_SOURCE_ID = "project-points-source"
+        private const val POINT_LAYER_ID = "project-points-layer"
     }
 
     private var map: MapLibreMap? = null
     private var style: Style? = null
     private var provider: MapProvider? = null
     private val rasterLayers = linkedMapOf<String, LocalRasterLayer>()
+    private val mapPoints = linkedMapOf<String, MapPoint>()
     private var maxDetailEnabled: Boolean = true
 
     fun bind(mapLibreMap: MapLibreMap) {
@@ -52,6 +67,7 @@ class MapLibreController {
             // Project order is top-to-bottom. MapLibre places newly-added layers on top,
             // so add them in reverse to keep the UI order visually correct.
             layers.asReversed().forEach { addRasterToStyle(it) }
+            renderPoints()
             setMaxDetail(maxDetailEnabled)
             onLoaded()
         }
@@ -73,6 +89,22 @@ class MapLibreController {
                 source.setPrefetchZoomDelta(null)
             }
         }
+    }
+
+    fun setPoints(points: List<MapPoint>) {
+        mapPoints.clear()
+        mapPoints.putAll(points.associateBy { it.id })
+        renderPoints()
+    }
+
+    fun addPoint(point: MapPoint) {
+        mapPoints[point.id] = point
+        renderPoints()
+    }
+
+    fun removePoint(pointId: String) {
+        mapPoints.remove(pointId)
+        renderPoints()
     }
 
     fun addRaster(layer: LocalRasterLayer) {
@@ -113,6 +145,12 @@ class MapLibreController {
         layersTopToBottom.asReversed().forEach { layer ->
             reusableLayers[layerStyleId(layer.id)]?.let(style::addLayer)
         }
+
+        // Keep persistent map points above raster overlays after reordering.
+        style.getLayerAs<CircleLayer>(POINT_LAYER_ID)?.let { pointLayer ->
+            style.removeLayer(pointLayer)
+            style.addLayer(pointLayer)
+        }
     }
 
     fun removeRaster(layer: LocalRasterLayer) {
@@ -145,6 +183,34 @@ class MapLibreController {
     fun displayedZoom(): Double = map?.cameraPosition?.zoom ?: 0.0
 
     fun centerLatitude(): Double = map?.cameraPosition?.target?.latitude ?: 0.0
+
+    private fun renderPoints() {
+        val style = style ?: return
+        val features = mapPoints.values.map { point ->
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        }.toTypedArray()
+        val collection = FeatureCollection.fromFeatures(features)
+
+        val source = style.getSource(POINT_SOURCE_ID) as? GeoJsonSource
+        if (source == null) {
+            style.addSource(GeoJsonSource(POINT_SOURCE_ID, collection))
+        } else {
+            source.setGeoJson(collection)
+        }
+
+        if (style.getLayer(POINT_LAYER_ID) == null) {
+            style.addLayer(
+                CircleLayer(POINT_LAYER_ID, POINT_SOURCE_ID).apply {
+                    setProperties(
+                        circleRadius(7.5f),
+                        circleColor(Color.rgb(126, 87, 255)),
+                        circleStrokeWidth(2.0f),
+                        circleStrokeColor(Color.WHITE),
+                    )
+                }
+            )
+        }
+    }
 
     private fun addRasterToStyle(layer: LocalRasterLayer) {
         val style = style ?: return
