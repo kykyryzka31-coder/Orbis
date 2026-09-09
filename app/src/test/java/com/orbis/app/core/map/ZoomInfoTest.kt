@@ -27,7 +27,7 @@ class ZoomInfoTest {
     }
 
     @Test
-    fun 512PixelTilesHaveTwiceThePixelDensityOf256AtSameZoom() {
+    fun pixel512TilesHaveTwiceThePixelDensityOf256AtSameZoom() {
         val r256 = ZoomInfo.displayedResolutionMetersPerPixel(0.0, 12.0, 256)
         val r512 = ZoomInfo.displayedResolutionMetersPerPixel(0.0, 12.0, 512)
         assertEquals(r256 / 2.0, r512, 1e-9)
