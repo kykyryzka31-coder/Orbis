@@ -31,9 +31,8 @@ class LocalRasterImporter(private val context: Context) {
         }
     }
 
-    suspend fun importPmTiles(uri: Uri): LocalRasterLayer = importRaster(uri).also {
-        require(it.format == LocalRasterFormat.PMTILES) { "Selected file is not .pmtiles" }
-    }
+    // Compatibility alias for the Phase-1 UI. It now accepts either supported raster archive.
+    suspend fun importPmTiles(uri: Uri): LocalRasterLayer = importRaster(uri)
 
     private fun importArchive(
         uri: Uri,
