@@ -20,6 +20,21 @@ class MeasurementFormatterTest {
     }
 
     @Test
+    fun formatsSmallAreaInSquareMeters() {
+        assertEquals("9500 m²", MeasurementFormatter.area(9_500.0))
+    }
+
+    @Test
+    fun formatsFieldAreaInHectares() {
+        assertEquals("2.50 ha", MeasurementFormatter.area(25_000.0))
+    }
+
+    @Test
+    fun formatsLargeAreaInSquareKilometers() {
+        assertEquals("2.50 km²", MeasurementFormatter.area(2_500_000.0))
+    }
+
+    @Test
     fun normalizesBearingIntoCompassCircle() {
         assertEquals("350°", MeasurementFormatter.bearing(-10.0))
         assertEquals("5°", MeasurementFormatter.bearing(365.0))
