@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.orbis.app"
-    // Android 17 / API 37 is still preview on the stable SDK channel as of Sep 2026.
+    // Android 17 / API 37 is preview on the stable SDK channel as of Sep 2026.
     // Orbis targets the latest stable platform so CI and production builds stay reproducible.
     compileSdk = 36
 
@@ -48,13 +48,14 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+    // Last stable Compose line that remains compatible with stable Android API 36.
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
