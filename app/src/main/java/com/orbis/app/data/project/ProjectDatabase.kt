@@ -42,6 +42,9 @@ class ProjectDatabase(context: Context) : SQLiteOpenHelper(
                 project_id INTEGER NOT NULL DEFAULT 1,
                 display_name TEXT NOT NULL,
                 file_path TEXT NOT NULL,
+                raster_format TEXT NOT NULL DEFAULT 'PMTILES',
+                tile_size INTEGER,
+                max_native_zoom REAL,
                 opacity REAL NOT NULL,
                 visible INTEGER NOT NULL,
                 sort_order INTEGER NOT NULL,
@@ -53,10 +56,14 @@ class ProjectDatabase(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("No database migrations are defined yet ($oldVersion -> $newVersion).")
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE raster_layer ADD COLUMN raster_format TEXT NOT NULL DEFAULT 'PMTILES'")
+            db.execSQL("ALTER TABLE raster_layer ADD COLUMN tile_size INTEGER")
+            db.execSQL("ALTER TABLE raster_layer ADD COLUMN max_native_zoom REAL")
+        }
     }
 
     companion object {
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
     }
 }
