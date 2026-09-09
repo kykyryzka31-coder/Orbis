@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.orbis.app.core.geo.CoordinateFormatter
 import com.orbis.app.core.map.LocalRasterImporter
 import com.orbis.app.core.map.MapLibreController
 import com.orbis.app.core.map.MapProvider
@@ -75,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import java.io.File
 import kotlin.math.roundToInt
@@ -125,6 +127,7 @@ fun MapScreen() {
     var restoredCameraApplied by remember { mutableStateOf(false) }
     var showLayers by remember { mutableStateOf(false) }
     var showProvider by remember { mutableStateOf(false) }
+    var selectedCoordinate by remember { mutableStateOf<LatLng?>(null) }
     var displayZoom by remember { mutableDoubleStateOf(0.0) }
     var centerLat by remember { mutableDoubleStateOf(0.0) }
     var cameraRevision by remember { mutableIntStateOf(0) }
@@ -154,6 +157,10 @@ fun MapScreen() {
                     displayZoom = controller.displayedZoom()
                     centerLat = controller.centerLatitude()
                     cameraRevision += 1
+                }
+                map.addOnMapClickListener { point ->
+                    selectedCoordinate = point
+                    true
                 }
                 mapReady = true
             }
@@ -438,6 +445,20 @@ fun MapScreen() {
             },
         )
     }
+
+    selectedCoordinate?.let { coordinate ->
+        CoordinateSheet(
+            coordinate = coordinate,
+            onCopy = {
+                val value = CoordinateFormatter.decimal(coordinate.latitude, coordinate.longitude)
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Coordinates", value))
+                transientMessage = "Coordinates copied"
+            },
+            onDismiss = { selectedCoordinate = null },
+        )
+    }
 }
 
 @Composable
@@ -623,6 +644,41 @@ private fun LayerRow(
                     Icon(Icons.Default.Close, contentDescription = "Remove layer")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CoordinateSheet(
+    coordinate: LatLng,
+    onCopy: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("COORDINATE", style = MaterialTheme.typography.labelLarge)
+            Text(
+                CoordinateFormatter.decimal(coordinate.latitude, coordinate.longitude),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                "WGS84 · Decimal degrees",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                CoordinateFormatter.dms(coordinate.latitude, coordinate.longitude),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            OutlinedButton(onClick = onCopy, modifier = Modifier.fillMaxWidth()) {
+                Text("COPY COORDINATES")
+            }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
