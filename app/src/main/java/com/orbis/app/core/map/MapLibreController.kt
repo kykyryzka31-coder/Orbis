@@ -49,7 +49,9 @@ class MapLibreController {
 
         map?.setStyle(provider.styleUri) { loadedStyle ->
             style = loadedStyle
-            layers.forEach { addRasterToStyle(it) }
+            // Project order is top-to-bottom. MapLibre places newly-added layers on top,
+            // so add them in reverse to keep the UI order visually correct.
+            layers.asReversed().forEach { addRasterToStyle(it) }
             setMaxDetail(maxDetailEnabled)
             onLoaded()
         }
@@ -82,6 +84,24 @@ class MapLibreController {
         rasterLayers[layer.id] = layer
         val rasterLayer = style?.getLayerAs<RasterLayer>(layerStyleId(layer.id)) ?: return
         rasterLayer.setProperties(rasterOpacity(if (layer.visible) layer.opacity else 0f))
+    }
+
+    /**
+     * Applies a top-to-bottom project layer order without recreating raster sources.
+     * Removing by Layer object preserves a reusable native layer reference.
+     */
+    fun setRasterOrder(layersTopToBottom: List<LocalRasterLayer>) {
+        rasterLayers.clear()
+        rasterLayers.putAll(layersTopToBottom.associateBy { it.id })
+        val style = style ?: return
+
+        val reusableLayers = layersTopToBottom.mapNotNull { layer ->
+            style.getLayerAs<RasterLayer>(layerStyleId(layer.id))?.also { style.removeLayer(it) }
+        }.associateBy { it.id }
+
+        layersTopToBottom.asReversed().forEach { layer ->
+            reusableLayers[layerStyleId(layer.id)]?.let(style::addLayer)
+        }
     }
 
     fun removeRaster(layer: LocalRasterLayer) {
