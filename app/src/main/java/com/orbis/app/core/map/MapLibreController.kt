@@ -12,6 +12,14 @@ import org.maplibre.android.style.sources.RasterSource
 import java.io.File
 
 class MapLibreController {
+    companion object {
+        /**
+         * MapLibre Native's renderer ceiling. This is intentionally not treated as
+         * native geographic detail: providers may stop supplying real tiles earlier.
+         */
+        const val RENDERER_MAX_DISPLAY_ZOOM = 25.5
+    }
+
     private var map: MapLibreMap? = null
     private var style: Style? = null
     private var provider: MapProvider? = null
@@ -21,6 +29,10 @@ class MapLibreController {
     fun bind(mapLibreMap: MapLibreMap) {
         map = mapLibreMap
         mapLibreMap.setTileCacheEnabled(true)
+        // MapLibre defaults to zoom 22. Orbis explicitly raises the display ceiling
+        // to the renderer maximum so providers with deeper native levels are not
+        // artificially capped by the application.
+        mapLibreMap.setMaxZoomPreference(RENDERER_MAX_DISPLAY_ZOOM)
     }
 
     fun loadProvider(
@@ -32,9 +44,16 @@ class MapLibreController {
         rasterLayers.clear()
         rasterLayers.putAll(layers.associateBy { it.id })
 
+        map?.apply {
+            setMinZoomPreference(provider.capabilities.minZoom.coerceIn(0.0, RENDERER_MAX_DISPLAY_ZOOM))
+            setMaxZoomPreference(RENDERER_MAX_DISPLAY_ZOOM)
+        }
+
         map?.setStyle(provider.styleUri) { loadedStyle ->
             style = loadedStyle
             layers.forEach { addRasterToStyle(it) }
+            // Styles can replace sources; re-apply the quality policy after every load.
+            setMaxDetail(maxDetailEnabled)
             onLoaded()
         }
     }
@@ -42,10 +61,13 @@ class MapLibreController {
     fun setMaxDetail(enabled: Boolean) {
         maxDetailEnabled = enabled
         val mapLibreMap = map ?: return
-        // In MAX DETAIL, do not intentionally prefetch a lower-LOD parent tile
-        // first. Request ideal tiles directly and severely limit parent overscale.
+        // In MAX DETAIL, ask for ideal tiles immediately rather than deliberately
+        // loading a lower-LOD parent first. Parent tiles may still be used briefly
+        // by the renderer while ideal tiles are unavailable, but overscaling is kept
+        // tight so they are replaced quickly by real higher-resolution tiles.
         mapLibreMap.setPrefetchZoomDelta(if (enabled) 0 else 4)
         mapLibreMap.setTileCacheEnabled(true)
+        mapLibreMap.setMaxZoomPreference(RENDERER_MAX_DISPLAY_ZOOM)
 
         style?.sources?.forEach { source ->
             if (enabled) {
@@ -90,7 +112,7 @@ class MapLibreController {
     fun restoreCamera(snapshot: CameraSnapshot) {
         map?.cameraPosition = CameraPosition.Builder()
             .target(LatLng(snapshot.latitude, snapshot.longitude))
-            .zoom(snapshot.zoom)
+            .zoom(snapshot.zoom.coerceAtMost(RENDERER_MAX_DISPLAY_ZOOM))
             .bearing(snapshot.bearing)
             .tilt(snapshot.tilt)
             .build()
