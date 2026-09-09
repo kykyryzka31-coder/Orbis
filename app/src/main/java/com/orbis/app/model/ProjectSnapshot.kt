@@ -20,4 +20,5 @@ data class ProjectSnapshot(
     val maxDetailEnabled: Boolean,
     val camera: CameraSnapshot,
     val rasterLayers: List<LocalRasterLayer>,
+    val points: List<MapPoint> = emptyList(),
 )
