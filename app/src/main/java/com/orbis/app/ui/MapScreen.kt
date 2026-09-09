@@ -671,6 +671,7 @@ private fun LayerRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CoordinateSheet(
     coordinate: LatLng,
