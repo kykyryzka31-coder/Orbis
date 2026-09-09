@@ -11,6 +11,8 @@ import com.orbis.app.model.LocalRasterLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 class LocalRasterImporter(private val context: Context) {
@@ -31,7 +33,6 @@ class LocalRasterImporter(private val context: Context) {
         }
     }
 
-    // Compatibility alias for the Phase-1 UI. It now accepts either supported raster archive.
     suspend fun importPmTiles(uri: Uri): LocalRasterLayer = importRaster(uri)
 
     private fun importArchive(
@@ -55,10 +56,9 @@ class LocalRasterImporter(private val context: Context) {
             }
             require(target.length() > 0L) { "Imported map file is empty." }
 
-            val mbtilesInfo = if (format == LocalRasterFormat.MBTILES) {
-                inspectRasterMbTiles(target)
-            } else {
-                null
+            val qualityInfo = when (format) {
+                LocalRasterFormat.MBTILES -> inspectRasterMbTiles(target)
+                LocalRasterFormat.PMTILES -> inspectRasterPmTiles(target)
             }
 
             return LocalRasterLayer(
@@ -66,8 +66,8 @@ class LocalRasterImporter(private val context: Context) {
                 displayName = sourceName,
                 filePath = target.absolutePath,
                 format = format,
-                tileSize = mbtilesInfo?.tileSize,
-                maxNativeZoom = mbtilesInfo?.maxNativeZoom,
+                tileSize = qualityInfo.tileSize,
+                maxNativeZoom = qualityInfo.maxNativeZoom,
             )
         } catch (error: Throwable) {
             target.delete()
@@ -84,7 +84,43 @@ class LocalRasterImporter(private val context: Context) {
         }
     }
 
-    private fun inspectRasterMbTiles(file: File): MbTilesInfo {
+    private fun inspectRasterPmTiles(file: File): RasterQualityInfo {
+        require(file.length() >= PMTILES_V3_HEADER_SIZE) {
+            "Invalid PMTiles archive: file is smaller than the v3 header."
+        }
+
+        val header = ByteArray(PMTILES_V3_HEADER_SIZE)
+        RandomAccessFile(file, "r").use { archive -> archive.readFully(header) }
+
+        val magic = String(header, 0, 7, StandardCharsets.US_ASCII)
+        require(magic == "PMTiles") { "Invalid PMTiles archive: missing PMTiles magic number." }
+
+        val version = header[7].toInt() and 0xFF
+        require(version == 3) {
+            "Unsupported PMTiles version $version. Orbis currently supports PMTiles v3."
+        }
+
+        val tileType = header[99].toInt() and 0xFF
+        require(tileType !in VECTOR_PMTILES_TYPES) {
+            "This PMTiles archive contains vector tiles. Vector PMTiles import is not implemented yet."
+        }
+
+        val minZoom = header[100].toInt() and 0xFF
+        val maxZoom = header[101].toInt() and 0xFF
+        require(maxZoom >= minZoom) {
+            "Invalid PMTiles zoom range: min Z$minZoom, max Z$maxZoom."
+        }
+
+        return RasterQualityInfo(
+            // PMTiles v3 exposes archive native zoom directly in its fixed header.
+            // Tile pixel dimensions are not a v3 header field, so keep that unknown
+            // rather than guessing 256 or 512.
+            tileSize = null,
+            maxNativeZoom = maxZoom.toDouble(),
+        )
+    }
+
+    private fun inspectRasterMbTiles(file: File): RasterQualityInfo {
         val database = SQLiteDatabase.openDatabase(
             file.absolutePath,
             null,
@@ -121,7 +157,7 @@ class LocalRasterImporter(private val context: Context) {
                 if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getDouble(0) else null
             }
 
-            MbTilesInfo(
+            RasterQualityInfo(
                 tileSize = options.outWidth,
                 maxNativeZoom = actualMaxZoom,
             )
@@ -163,12 +199,14 @@ class LocalRasterImporter(private val context: Context) {
         return if (gb >= 1.0) "%.1f GB".format(gb) else "%.0f MB".format(bytes / (1024.0 * 1024.0))
     }
 
-    private data class MbTilesInfo(
-        val tileSize: Int,
+    private data class RasterQualityInfo(
+        val tileSize: Int?,
         val maxNativeZoom: Double?,
     )
 
     private companion object {
         const val COPY_BUFFER_SIZE = 1024 * 1024
+        const val PMTILES_V3_HEADER_SIZE = 127
+        val VECTOR_PMTILES_TYPES = setOf(1, 6)
     }
 }
