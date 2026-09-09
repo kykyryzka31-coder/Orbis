@@ -9,6 +9,12 @@ class MeasurementSession {
     val totalDistanceMeters: Double
         get() = GeoMath.polylineDistanceMeters(mutablePoints)
 
+    val polygonAreaSquareMeters: Double?
+        get() = mutablePoints.takeIf { it.size >= 3 }?.let(GeoMath::polygonAreaSquareMeters)
+
+    val polygonPerimeterMeters: Double?
+        get() = mutablePoints.takeIf { it.size >= 3 }?.let(GeoMath::polygonPerimeterMeters)
+
     val lastSegmentDistanceMeters: Double?
         get() = mutablePoints.takeLast(2).takeIf { it.size == 2 }
             ?.let { (start, end) -> GeoMath.distanceMeters(start, end) }
