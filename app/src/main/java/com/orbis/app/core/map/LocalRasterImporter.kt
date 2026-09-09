@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
-import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 class LocalRasterImporter(private val context: Context) {
@@ -85,38 +84,23 @@ class LocalRasterImporter(private val context: Context) {
     }
 
     private fun inspectRasterPmTiles(file: File): RasterQualityInfo {
-        require(file.length() >= PMTILES_V3_HEADER_SIZE) {
+        require(file.length() >= PmTilesV3Header.SIZE_BYTES) {
             "Invalid PMTiles archive: file is smaller than the v3 header."
         }
 
-        val header = ByteArray(PMTILES_V3_HEADER_SIZE)
+        val header = ByteArray(PmTilesV3Header.SIZE_BYTES)
         RandomAccessFile(file, "r").use { archive -> archive.readFully(header) }
+        val info = PmTilesV3Header.parse(header)
 
-        val magic = String(header, 0, 7, StandardCharsets.US_ASCII)
-        require(magic == "PMTiles") { "Invalid PMTiles archive: missing PMTiles magic number." }
-
-        val version = header[7].toInt() and 0xFF
-        require(version == 3) {
-            "Unsupported PMTiles version $version. Orbis currently supports PMTiles v3."
-        }
-
-        val tileType = header[99].toInt() and 0xFF
-        require(tileType !in VECTOR_PMTILES_TYPES) {
+        require(!info.isVector) {
             "This PMTiles archive contains vector tiles. Vector PMTiles import is not implemented yet."
         }
 
-        val minZoom = header[100].toInt() and 0xFF
-        val maxZoom = header[101].toInt() and 0xFF
-        require(maxZoom >= minZoom) {
-            "Invalid PMTiles zoom range: min Z$minZoom, max Z$maxZoom."
-        }
-
         return RasterQualityInfo(
-            // PMTiles v3 exposes archive native zoom directly in its fixed header.
-            // Tile pixel dimensions are not a v3 header field, so keep that unknown
-            // rather than guessing 256 or 512.
+            // PMTiles v3 stores native zoom in its fixed header. Tile pixel size is
+            // not part of that header, so Orbis keeps it unknown instead of guessing.
             tileSize = null,
-            maxNativeZoom = maxZoom.toDouble(),
+            maxNativeZoom = info.maxZoom.toDouble(),
         )
     }
 
@@ -206,7 +190,5 @@ class LocalRasterImporter(private val context: Context) {
 
     private companion object {
         const val COPY_BUFFER_SIZE = 1024 * 1024
-        const val PMTILES_V3_HEADER_SIZE = 127
-        val VECTOR_PMTILES_TYPES = setOf(1, 6)
     }
 }
